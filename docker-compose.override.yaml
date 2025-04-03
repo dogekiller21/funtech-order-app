@@ -1,0 +1,10 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/docker/dev.dockerfile
+    volumes:
+      - ./src:/app/src
+  migrate:
+    volumes:
+      - ./src:/app/src

@@ -1,0 +1,147 @@
+services:
+  db:
+    image: postgres:17.4
+    container_name: postgres_db
+    restart: always
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-funtech}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-funtech}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER:-funtech}", "-d", "${POSTGRES_DB:-funtech}"]
+      interval: 2s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis:
+    image: redis:7.4
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  rabbitmq:
+    image: rabbitmq:4.0
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "check_running" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    container_name: backend
+    build:
+      context: .
+      dockerfile: deploy/docker/run.dockerfile
+    ports:
+      - "${APP_PORT}:8000"
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-funtech}
+      DB_USER: ${DB_USER:-funtech}
+      DB_PASSWORD: ${DB_PASSWORD:-qwerty1234}
+      DB_URL_SCHEMA: ${DB_URL_SCHEMA:-postgresql}
+
+      JWT_AUTH_SECRET: ${JWT_AUTH_SECRET}
+
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_TTL: ${REDIS_TTL}
+
+      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      RABBITMQ_PORT: ${RABBITMQ_PORT}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE}
+      RABBITMQ_ROUTING_KEY: ${RABBITMQ_ROUTING_KEY}
+      RABBITMQ_PREFETCH_COUNT: ${RABBITMQ_PREFETCH_COUNT}
+
+      DEBUG: ${DEBUG}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: always
+
+  migrate:
+    image: ${COMPOSE_PROJECT_NAME}-backend
+    container_name: migration
+    restart: "no"
+    command: "uv run -- alembic -c ../alembic.ini upgrade head"
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-funtech}
+      DB_USER: ${DB_USER:-funtech}
+      DB_PASSWORD: ${DB_PASSWORD:-qwerty1234}
+      DB_URL_SCHEMA: ${DB_URL_SCHEMA:-postgresql}
+      JWT_AUTH_SECRET: ${JWT_AUTH_SECRET}
+      DEBUG: ${DEBUG}
+
+  celery:
+    image: ${COMPOSE_PROJECT_NAME}-backend
+    container_name: celery_worker
+    command: >
+      uv run -- celery -A worker.client worker --loglevel=info
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-funtech}
+      DB_USER: ${DB_USER:-funtech}
+      DB_PASSWORD: ${DB_PASSWORD:-qwerty1234}
+      DB_URL_SCHEMA: ${DB_URL_SCHEMA:-postgresql}
+
+      JWT_AUTH_SECRET: ${JWT_AUTH_SECRET}
+
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_TTL: ${REDIS_TTL}
+
+      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      RABBITMQ_PORT: ${RABBITMQ_PORT}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE}
+      RABBITMQ_ROUTING_KEY: ${RABBITMQ_ROUTING_KEY}
+      RABBITMQ_PREFETCH_COUNT: ${RABBITMQ_PREFETCH_COUNT}
+
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
